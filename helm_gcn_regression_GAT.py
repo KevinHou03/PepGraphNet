@@ -6,6 +6,7 @@ from torch_geometric.data import Data, InMemoryDataset
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import GCNConv, global_mean_pool
 from sklearn.model_selection import train_test_split
+from torch_geometric.nn import GATConv, global_mean_pool
 import ast
 
 # === Step 1: Load data ===
@@ -45,15 +46,20 @@ residue_list = sorted(residue_set)
 residue2id = {res: i for i, res in enumerate(residue_list)}
 
 # === Step 3: HELM to PyG Data ===
-def helm_to_pyg_data(helm_str, target, residue2id):
+def helm_to_pyg_data(helm_str, target, residue2id, causal=True):
     residues = extract_residues(helm_str)
     residue_ids = [residue2id[r] for r in residues]
     edge_list = []
 
     for i in range(len(residue_ids) - 1):
-        edge_list.append((i, i + 1))
-        edge_list.append((i + 1, i))
+        # 如果 causal，只加 i → i+1（不加 i+1 → i）
+        if causal:
+            edge_list.append((i, i + 1))
+        else:
+            edge_list.append((i, i + 1))
+            edge_list.append((i + 1, i))
 
+    # optional: add cross-links if any
     if "$" in helm_str:
         parts = helm_str.split("$")
         if len(parts) > 1 and ":" in parts[1]:
@@ -61,8 +67,8 @@ def helm_to_pyg_data(helm_str, target, residue2id):
                 cross = parts[1].split(",")[2]
                 p1 = int(cross.split("-")[0].split(":")[0]) - 1
                 p2 = int(cross.split("-")[1].split(":")[0]) - 1
-                edge_list.append((p1, p2))
-                edge_list.append((p2, p1))
+                if not causal or (p1 < p2):  # only allow past→future
+                    edge_list.append((p1, p2))
             except:
                 pass
 
@@ -71,7 +77,6 @@ def helm_to_pyg_data(helm_str, target, residue2id):
     y = torch.tensor([target], dtype=torch.float)
 
     return Data(x=x, edge_index=edge_index, y=y)
-
 # === Step 4: Dataset class ===
 class PeptideHelmDataset(InMemoryDataset):
     def __init__(self, dataframe, residue2id):
@@ -82,18 +87,20 @@ class PeptideHelmDataset(InMemoryDataset):
         self.data, self.slices = self.collate(data_list)
 
 # === Step 5: Define GCN Model ===
-class GCNResidueEmbedding(nn.Module):
-    def __init__(self, num_residues, emb_dim, hidden_dim):
+class GATResidueEmbedding(nn.Module):
+    def __init__(self, num_residues, emb_dim, hidden_dim, heads=1):
         super().__init__()
         self.embedding = nn.Embedding(num_residues, emb_dim)
-        self.conv1 = GCNConv(emb_dim, hidden_dim)
-        self.conv2 = GCNConv(hidden_dim, hidden_dim)
+        self.gat1 = GATConv(emb_dim, hidden_dim, heads=heads, concat=True)
+        self.gat2 = GATConv(hidden_dim * heads, hidden_dim, heads=1, concat=False)
         self.lin = nn.Linear(hidden_dim, 1)
+
+        self.dropout = nn.Dropout(p=0.2)
 
     def forward(self, x, edge_index, batch):
         x = self.embedding(x.squeeze())
-        x = self.conv1(x, edge_index).relu()
-        x = self.conv2(x, edge_index).relu()
+        x = self.dropout(F.leaky_relu(self.gat1(x, edge_index)))
+        x = self.dropout(F.leaky_relu(self.gat2(x, edge_index)))
         x = global_mean_pool(x, batch)
         return self.lin(x).squeeze()
 
@@ -111,8 +118,9 @@ test_loader = DataLoader(test_dataset, batch_size=32)
 
 # === Step 7: Train model ===
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = GCNResidueEmbedding(num_residues=len(residue2id), emb_dim=32, hidden_dim=128).to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=5e-4)
+model = GATResidueEmbedding(num_residues=len(residue2id), emb_dim=32, hidden_dim=128)
+# optimizer = torch.optim.Adam(model.parameters(), lr=5e-4)
+optimizer = torch.optim.Adam(model.parameters(), lr=5e-4, weight_decay=1e-4)
 
 
 def evaluate(loader):
