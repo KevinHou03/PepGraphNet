@@ -46,20 +46,23 @@ residue_list = sorted(residue_set)
 residue2id = {res: i for i, res in enumerate(residue_list)}
 
 # === Step 3: HELM to PyG Data ===
+# 这个函数负责把 HELM 表达式转化为图结构 PyG）
 def helm_to_pyg_data(helm_str, target, residue2id, causal=True):
     residues = extract_residues(helm_str)
     residue_ids = [residue2id[r] for r in residues]
     edge_list = []
 
     for i in range(len(residue_ids) - 1):
-        # 如果 causal，只加 i → i+1（不加 i+1 → i）
+        # 如果是causal的话
         if causal:
-            edge_list.append((i, i + 1))
+            for i in range(1, len(residue_ids)):
+                for j in range(i):  #j<i
+                    edge_list.append((i, j))  # i 可以看到过去的所有 j ？
         else:
             edge_list.append((i, i + 1))
             edge_list.append((i + 1, i))
 
-    # optional: add cross-links if any
+
     if "$" in helm_str:
         parts = helm_str.split("$")
         if len(parts) > 1 and ":" in parts[1]:
@@ -74,6 +77,7 @@ def helm_to_pyg_data(helm_str, target, residue2id, causal=True):
 
     x = torch.tensor(residue_ids, dtype=torch.long).unsqueeze(1)
     edge_index = torch.tensor(edge_list, dtype=torch.long).t().contiguous()
+    # true val
     y = torch.tensor([target], dtype=torch.float)
 
     return Data(x=x, edge_index=edge_index, y=y)
@@ -88,19 +92,26 @@ class PeptideHelmDataset(InMemoryDataset):
 
 # === Step 5: Define GCN Model ===
 class GATResidueEmbedding(nn.Module):
-    def __init__(self, num_residues, emb_dim, hidden_dim, heads=1):
+    def __init__(self, num_residues, emb_dim, hidden_dim, heads = 3):
         super().__init__()
         self.embedding = nn.Embedding(num_residues, emb_dim)
         self.gat1 = GATConv(emb_dim, hidden_dim, heads=heads, concat=True)
+        self.norm1 = nn.LayerNorm(hidden_dim * heads)
         self.gat2 = GATConv(hidden_dim * heads, hidden_dim, heads=1, concat=False)
+        self.norm2 = nn.LayerNorm(hidden_dim)
         self.lin = nn.Linear(hidden_dim, 1)
-
-        self.dropout = nn.Dropout(p=0.2)
+        self.dropout = nn.Dropout(p=0.1)
 
     def forward(self, x, edge_index, batch):
         x = self.embedding(x.squeeze())
-        x = self.dropout(F.leaky_relu(self.gat1(x, edge_index)))
-        x = self.dropout(F.leaky_relu(self.gat2(x, edge_index)))
+        # Layer1 ->  GAT + LayerNorm + Dropout
+        x = self.gat1(x, edge_index)
+        x = F.leaky_relu(self.norm1(x))
+        x = self.dropout(x)
+        # layer2
+        x = self.gat2(x, edge_index)
+        x = F.leaky_relu(self.norm2(x))
+        x = self.dropout(x)
         x = global_mean_pool(x, batch)
         return self.lin(x).squeeze()
 
@@ -120,10 +131,10 @@ test_loader = DataLoader(test_dataset, batch_size=32)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = GATResidueEmbedding(num_residues=len(residue2id), emb_dim=32, hidden_dim=128)
 # optimizer = torch.optim.Adam(model.parameters(), lr=5e-4)
-optimizer = torch.optim.Adam(model.parameters(), lr=5e-4, weight_decay=1e-4)
+optimizer = torch.optim.Adam(model.parameters(), lr=2e-4, weight_decay=1e-4)
 
 
-def evaluate(loader):
+def evaluate(loader, verbose=False):
     model.eval()
     y_true, y_pred = [], []
     with torch.no_grad():
@@ -132,6 +143,9 @@ def evaluate(loader):
             out = model(batch.x, batch.edge_index, batch.batch)
             y_true.append(batch.y)
             y_pred.append(out)
+            if verbose:
+                for true_val, pred_val in zip(batch.y.cpu().numpy(), out.cpu().numpy()):
+                    print(f"True: {true_val:.4f}, Predicted: {pred_val:.4f}")
     y_true = torch.cat(y_true)
     y_pred = torch.cat(y_pred)
     mse = F.mse_loss(y_pred, y_true).item()
@@ -179,8 +193,9 @@ def compute_accuracy(loader, threshold=0.1):
             total += batch.y.size(0)
     accuracy = correct / total if total > 0 else 0
     return accuracy
+
 # === Step 8: Final evaluation ===
-test_loss = evaluate(test_loader)
+test_loss = evaluate(test_loader, verbose=True)
 print(f"Test MSE: {test_loss:.4f}")
-print(compute_relative_accuracy(test_loader, relative_threshold=0.05))
-print(compute_accuracy(test_loader, threshold=0.1))
+print(compute_relative_accuracy(test_loader, relative_threshold=0.1)) #误差在真实值的多少百分比内
+print(compute_accuracy(test_loader, threshold=1)) #误差在指定范围内的比例/

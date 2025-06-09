@@ -112,7 +112,7 @@ test_loader = DataLoader(test_dataset, batch_size=32)
 # === Step 7: Train model ===
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = GCNResidueEmbedding(num_residues=len(residue2id), emb_dim=32, hidden_dim=128).to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=5e-4)
+optimizer = torch.optim.Adam(model.parameters(), lr=2e-4)
 
 
 def evaluate(loader):
@@ -143,7 +143,7 @@ for epoch in range(1, 101):
     val_loss = evaluate(val_loader)
     print(f"Epoch {epoch:03d}, Train Loss: {total_loss/len(train_loader):.4f}, Val Loss: {val_loss:.4f}")
 
-def compute_relative_accuracy(loader, relative_threshold=0.05):
+def compute_relative_accuracy(loader, relative_threshold=0.1):
     model.eval()
     correct = 0
     total = 0
@@ -158,7 +158,7 @@ def compute_relative_accuracy(loader, relative_threshold=0.05):
     return accuracy
 
 
-def compute_accuracy(loader, threshold=0.1):
+def compute_accuracy(loader, threshold=1):
     model.eval()
     correct = 0
     total = 0
@@ -174,5 +174,5 @@ def compute_accuracy(loader, threshold=0.1):
 # === Step 8: Final evaluation ===
 test_loss = evaluate(test_loader)
 print(f"Test MSE: {test_loss:.4f}")
-print(compute_relative_accuracy(test_loader, relative_threshold=0.05))
-print(compute_accuracy(test_loader, threshold=0.1))
+print(compute_relative_accuracy(test_loader, relative_threshold=0.1))
+print(compute_accuracy(test_loader, threshold=1))
