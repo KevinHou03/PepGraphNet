@@ -86,3 +86,6 @@ print(lariat_rrck)# 0
 circle_mdck = ((data['MDCK'].notna()) & (data['Molecule_Shape'] == 'Circle')).sum()
 print(circle_mdck)# 53
 
+
+
+# data.to_csv('/Users/kevinhou/Documents/CY Lab/Data/CycPeptMPDB_Peptide_Cleaned.csv')
