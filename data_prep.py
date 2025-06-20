@@ -5,7 +5,7 @@ from rdkit import Chem
 from rdkit.Chem import inchi
 
 # load data
-data = pd.read_csv('/Users/kevinhou/Documents/CY Lab/Data/CycPeptMPDB_Peptide_All (1).csv', low_memory=False) # this address mixed datatype
+data = pd.read_csv('/Users/kevinhou/Documents/CY Lab/Data/raw_data/CycPeptMPDB_Peptide_All.csv', low_memory=False) # this address mixed datatype
 print(data.shape) # 8466, 247
 
 '''
@@ -13,8 +13,8 @@ print(data.shape) # 8466, 247
 '''
 data.dropna(subset=['Permeability'], inplace=True) # Same_Peptides_Permeability or Permeability?
 # data.dropna(subset=['Same_Peptides_Assay'], inplace=True)
+'''remove missing SMILES'''
 data.dropna(subset=['SMILES'], inplace=True)
-
 
 '''
 2. "Data with permeability values less than 10−8 cm/s or greater than10−4 cm/s were 
@@ -69,6 +69,7 @@ dtype: int64
 '''
 #4. Lariat vs Circle
 # 4.1: lariat Caco-2
+# lariat_rrck and lariat_mdck deleted due to 0 value
 lariat_caco2 = ((data['Caco2'].notna()) & (data['Molecule_Shape'] == 'Lariat')).sum()
 print(lariat_caco2) # 307
 circle_caco2 = ((data['Caco2'].notna()) & (data['Molecule_Shape'] == 'Circle')).sum()
@@ -77,14 +78,19 @@ lariat_pampa = ((data['PAMPA'].notna()) & (data['Molecule_Shape'] == 'Lariat')).
 print(lariat_pampa) # 2287
 circle_pampa = ((data['PAMPA'].notna()) & (data['Molecule_Shape'] == 'Circle')).sum()
 print(circle_pampa) # 4560
-lariat_rrck = ((data['RRCK'].notna()) & (data['Molecule_Shape'] == 'Lariat')).sum()
-print(lariat_rrck) # 0
 circle_rrck = ((data['RRCK'].notna()) & (data['Molecule_Shape'] == 'Circle')).sum()
 print(circle_rrck)# 162
-lariat_mdck = ((data['MDCK'].notna()) & (data['Molecule_Shape'] == 'Lariat')).sum()
-print(lariat_rrck)# 0
 circle_mdck = ((data['MDCK'].notna()) & (data['Molecule_Shape'] == 'Circle')).sum()
 print(circle_mdck)# 53
+caco2_all = data[data['Caco2'].notna()].shape[0]
+print(caco2_all) # 918
+pampa_all = data[data['PAMPA'].notna()].shape[0]
+print(pampa_all)# 6847
+circle_all = data[data['Molecule_Shape'] == 'Circle'].shape[0]
+print(circle_all)# 5032
+lariat_all = data[data['Molecule_Shape'] == 'Lariat'].shape[0]
+print(lariat_all)# 2594
+
 
 
 
